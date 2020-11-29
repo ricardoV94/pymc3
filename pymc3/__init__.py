@@ -46,6 +46,7 @@ from pymc3.data import *
 from pymc3.distributions import *
 from pymc3.distributions import transforms
 from pymc3.exceptions import *
+from pymc3.grid import *
 from pymc3.glm import *
 from pymc3.math import (
     expand_packed_triangular,
