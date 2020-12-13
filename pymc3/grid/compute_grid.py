@@ -13,7 +13,7 @@
 #   limitations under the License.
 
 import numpy as np
-from pandas import Series
+from pandas import Series, DataFrame, MultiIndex
 
 from ..model import modelcontext, DictToArrayBijection, ArrayOrdering
 
@@ -22,7 +22,26 @@ def compute_grid(
         intervals,
         model=None,
 ):
-    model = modelcontext(model)
+    """
+
+    Parameters
+    ----------
+    intervals :
+    model :
+
+    Returns
+    -------
+    pymc3.Grid object
+    """
+
+    if model is None:
+        model = modelcontext(model)
+
+    for variable, value in intervals.items():
+        try:
+            value = iter(value)
+        except TypeError:
+            intervals[variable] = [value]
 
     grid_vars = (model[v] for v in intervals.keys())
     bij = DictToArrayBijection(ArrayOrdering(grid_vars), model.test_point)
@@ -42,39 +61,50 @@ def compute_grid(
 
 
 class Grid:
-    def __init__(self, coords, lly, ):
+    def __init__(self, coords, lly,):
         self.coords = coords
         self.lly = lly
         self.ly = np.exp(lly - np.max(lly))
         self.var_dims = {var: dim for dim, var in enumerate(coords.keys())}
         self.dims = tuple(self.var_dims.values())
 
-    def marginal(self, var):
-        var_dim = self.var_dims[var]
-        marginal_dims = tuple((dim for dim in self.dims if dim != var_dim))
-        if len(marginal_dims) == 1:
-            marginal_dims = marginal_dims[0]
-        print(marginal_dims)
-        marginal_ly = np.sum(self.ly, axis=marginal_dims)
+    def marginal(self, variables):
+        """ Return marginal probability for the selected variable(s).
 
-        return Series(index=self.coords[var],
-                      data=marginal_ly / np.sum(marginal_ly),
-                      name='PMF')
+        Note: Order of varibles is ignored. Output respects the order of the
+        variables with which the grid object was created.
 
-    def joint(self, variables):
-        # TODO: Return MultiIndex PMF
-        # TODO: Merge with marginal
+        Parameters
+        ----------
+        variables: str or list of str
+            Name of variable(s) whose marginal probability to compute.
+
+        Returns
+        -------
+            pd.Series or pd.DataFrame containing the the value of each variable
+            as index (or MultiIndex) and a single column "PMF" with the respective
+            probability.
+        """
+
+        if isinstance(variables, str):
+            variables = [variables]
+        else:
+            variables = list(sorted(variables, key=lambda v: self.var_dims[v]))
+
         var_dims = [self.var_dims[var] for var in variables]
-        marginal_dims = [dim for dim in self.dims if dim not in var_dims]
-
-        if len(marginal_dims) == 0:
-            return self.ly
-
-        if len(marginal_dims) == 1:
-            marginal_dims = marginal_dims[0]
+        marginal_dims = tuple((dim for dim in self.dims if dim not in var_dims))
 
         marginal_ly = np.sum(self.ly, axis=marginal_dims)
-        return marginal_ly
+        marginal_ly /= np.sum(marginal_ly)
+
+        if marginal_ly.ndim == 0:
+            return Series(data=marginal_ly, name='PMF')
+        elif marginal_ly.ndim == 1:
+            return Series(index=self.coords[variables[0]], data=marginal_ly, name='PMF')
+        else:
+            var_coords = [self.coords[var] for var in variables]
+            index = MultiIndex.from_product(var_coords, names=variables)
+            return DataFrame(data=marginal_ly.flatten(), index=index, columns=['PMF'])
 
     def sample(self, draws=2000, jitter=False):
         # Return SimpleTrace object
