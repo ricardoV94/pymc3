@@ -14,7 +14,7 @@
 
 from pymc3.distributions import shape_utils, timeseries, transforms
 from pymc3.distributions.bart import BART
-from pymc3.distributions.bound import Bound
+from pymc3.distributions.bound import Bound, Truncated
 from pymc3.distributions.continuous import (
     AsymmetricLaplace,
     Beta,
@@ -177,6 +177,7 @@ __all__ = [
     "LogitNormal",
     "Interpolated",
     "Bound",
+    "Truncated",
     "Rice",
     "Moyal",
     "Simulator",
