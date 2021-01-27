@@ -86,7 +86,9 @@ def bound(logp, *conditions, **kwargs):
     else:
         alltrue = alltrue_scalar
 
-    return tt.switch(alltrue(conditions), logp, -np.inf)
+    bound_switch = tt.switch(alltrue(conditions), logp, -np.inf)
+    bound_switch.name = 'bound_switch'
+    return bound_switch
 
 
 def alltrue_elemwise(vals):
