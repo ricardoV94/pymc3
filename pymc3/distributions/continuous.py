@@ -269,7 +269,31 @@ class Uniform(BoundedContinuous):
         """
         lower = self.lower
         upper = self.upper
-        return bound(-tt.log(upper - lower), value >= lower, value <= upper)
+
+        # Implicit bound is not usefully parsed with composite conditions
+        # return tt.switch(
+        #     (value < lower) | (value > upper),
+        #     -np.inf,
+        #     -tt.log(upper - lower),
+        #     )
+        # )
+
+        # Implicit bound works okay with one condition at a time
+        # return tt.switch(
+        #     value < lower,
+        #     -np.inf,
+        #     tt.switch(
+        #         value <= upper,
+        #         -tt.log(upper - lower),
+        #         -np.inf,
+        #     )
+        # )
+
+        return bound(
+            -tt.log(upper - lower),
+            value >= lower,
+            value <= upper,
+        )
 
     def logcdf(self, value):
         """

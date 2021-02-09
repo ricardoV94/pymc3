@@ -97,7 +97,7 @@ def alltrue_elemwise(vals):
         ret = ret * (1 * c)
     return ret
 
-
+# TODO: Check if custom logic is needed for this one
 def alltrue_scalar(vals):
     return tt.all([tt.all(1 * val) for val in vals])
 
