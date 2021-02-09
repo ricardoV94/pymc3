@@ -128,7 +128,7 @@ theano_logical_comparators_parse_map = {
 }
 
 # TODO: Flip logic for implicit bounds with expression_false
-# TODO: Print only non-repeated bad values (and trim output)
+# TODO: Print only non-repeated bad values (and trim output) (for logp expression issue as well)
 # TODO: Get parameter / observed names (is this possible)?
 # TODO: Add logic for BinaryBitOps ?
 def debug_bounds(model, variable, implicit_bounds=False):
@@ -203,7 +203,7 @@ def debug_bounds(model, variable, implicit_bounds=False):
                 )
                 print(f'{ivs[0]} {logical_comp} {ivs[1]}')
 
-
+# TODO: Add argument mask_good_values (= True by default)
 def debug_bad_energy(model, implicit_bounds=False):
     test_point = model.test_point
     for variable in model.basic_RVs:
