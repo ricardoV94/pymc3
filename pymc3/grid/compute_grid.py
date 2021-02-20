@@ -15,7 +15,11 @@
 import numpy as np
 from pandas import Series, DataFrame, MultiIndex
 
-from ..model import modelcontext, DictToArrayBijection, ArrayOrdering
+from pymc3.blocking import DictToArrayBijection, ArrayOrdering
+from pymc3.model import modelcontext
+from pymc3.theanof import inputvars
+from pymc3.tuning.starting import allinmodel
+from pymc3.util import is_transformed_name, get_transformed
 
 
 def compute_grid(
@@ -43,10 +47,29 @@ def compute_grid(
         except TypeError:
             intervals[variable] = [value]
 
-    grid_vars = (model[v] for v in intervals.keys())
-    bij = DictToArrayBijection(ArrayOrdering(grid_vars), model.test_point)
-    logp_func = bij.mapf(model.fastlogp_nojac)
+    user_input_vars = [model[v] for v in intervals.keys()]
+    # theano_input_vars = inputvars(user_input_vars)
+    theano_input_vars = model.basic_RVs
 
+    missing_user_input_vars = set(user_input_vars) - set(theano_input_vars)
+    if missing_user_input_vars:
+        raise ValueError(f'Grid variables are not defined in the model {missing_user_input_vars}. Model variables include {theano_input_vars}')
+
+    missing_theano_input_vars = set(theano_input_vars) - set(user_input_vars)
+    for var in missing_theano_input_vars:
+        testval = var.get_test_value()
+        print(f'No grid points were defined for variable {var}. Automatically adding testval {testval} to grid')
+        intervals[var.name] = np.atleast_1d(testval)
+        user_input_vars.append(var)
+
+    # for interval_var, input_var in zip(intervals.keys(), grid_input_vars):
+    #     if is_transformed_name(input_var.name):
+    #         print(f'The grid points for variable {interval_var} will be automatically converted to the transformed scale {input_var.name}')
+    # variables_missing =
+    # allinmodel(grid_input_vars, model)
+
+    bij = DictToArrayBijection(ArrayOrdering(user_input_vars), model.test_point)
+    logp_func = bij.mapf(model.fastlogp_nojac)
     grid = np.meshgrid(*intervals.values(), indexing='ij')
     grid_shape = grid[0].shape
     lly = np.zeros(grid[0].size)
