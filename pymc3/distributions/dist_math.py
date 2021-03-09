@@ -18,17 +18,17 @@ Created on Mar 7, 2011
 @author: johnsalvatier
 """
 import aesara
+import aesara.scalar as aes
 import aesara.tensor as aet
 import numpy as np
 import scipy.linalg
+import scipy.special
 import scipy.stats
 
-from aesara import scan
 from aesara.compile.builders import OpFromGraph
 from aesara.graph.basic import Apply
 from aesara.graph.op import Op
-from aesara.scalar import UnaryScalarOp, upgrade_to_float_no_complex
-from aesara.scan import until
+from aesara.scalar import ScalarOp, UnaryScalarOp, upgrade_to_float_no_complex
 from aesara.tensor.elemwise import Elemwise
 from aesara.tensor.slinalg import Cholesky, Solve
 
@@ -427,167 +427,6 @@ def zvalue(value, sigma, mu):
     return (value - mu) / sigma
 
 
-def incomplete_beta_cfe(a, b, x, small):
-    """Incomplete beta continued fraction expansions
-    based on Cephes library by Steve Moshier (incbet.c).
-    small: Choose element-wise which continued fraction expansion to use.
-    """
-    BIG = aet.constant(4.503599627370496e15, dtype="float64")
-    BIGINV = aet.constant(2.22044604925031308085e-16, dtype="float64")
-    THRESH = aet.constant(3.0 * np.MachAr().eps, dtype="float64")
-
-    zero = aet.constant(0.0, dtype="float64")
-    one = aet.constant(1.0, dtype="float64")
-    two = aet.constant(2.0, dtype="float64")
-
-    r = one
-    k1 = a
-    k3 = a
-    k4 = a + one
-    k5 = one
-    k8 = a + two
-
-    k2 = aet.switch(small, a + b, b - one)
-    k6 = aet.switch(small, b - one, a + b)
-    k7 = aet.switch(small, k4, a + one)
-    k26update = aet.switch(small, one, -one)
-    x = aet.switch(small, x, x / (one - x))
-
-    pkm2 = zero
-    qkm2 = one
-    pkm1 = one
-    qkm1 = one
-    r = one
-
-    def _step(i, pkm1, pkm2, qkm1, qkm2, k1, k2, k3, k4, k5, k6, k7, k8, r):
-        xk = -(x * k1 * k2) / (k3 * k4)
-        pk = pkm1 + pkm2 * xk
-        qk = qkm1 + qkm2 * xk
-        pkm2 = pkm1
-        pkm1 = pk
-        qkm2 = qkm1
-        qkm1 = qk
-
-        xk = (x * k5 * k6) / (k7 * k8)
-        pk = pkm1 + pkm2 * xk
-        qk = qkm1 + qkm2 * xk
-        pkm2 = pkm1
-        pkm1 = pk
-        qkm2 = qkm1
-        qkm1 = qk
-
-        old_r = r
-        r = aet.switch(aet.eq(qk, zero), r, pk / qk)
-
-        k1 += one
-        k2 += k26update
-        k3 += two
-        k4 += two
-        k5 += one
-        k6 -= k26update
-        k7 += two
-        k8 += two
-
-        big_cond = aet.gt(aet.abs_(qk) + aet.abs_(pk), BIG)
-        biginv_cond = aet.or_(aet.lt(aet.abs_(qk), BIGINV), aet.lt(aet.abs_(pk), BIGINV))
-
-        pkm2 = aet.switch(big_cond, pkm2 * BIGINV, pkm2)
-        pkm1 = aet.switch(big_cond, pkm1 * BIGINV, pkm1)
-        qkm2 = aet.switch(big_cond, qkm2 * BIGINV, qkm2)
-        qkm1 = aet.switch(big_cond, qkm1 * BIGINV, qkm1)
-
-        pkm2 = aet.switch(biginv_cond, pkm2 * BIG, pkm2)
-        pkm1 = aet.switch(biginv_cond, pkm1 * BIG, pkm1)
-        qkm2 = aet.switch(biginv_cond, qkm2 * BIG, qkm2)
-        qkm1 = aet.switch(biginv_cond, qkm1 * BIG, qkm1)
-
-        return (
-            (pkm1, pkm2, qkm1, qkm2, k1, k2, k3, k4, k5, k6, k7, k8, r),
-            until(aet.abs_(old_r - r) < (THRESH * aet.abs_(r))),
-        )
-
-    (pkm1, pkm2, qkm1, qkm2, k1, k2, k3, k4, k5, k6, k7, k8, r), _ = scan(
-        _step,
-        sequences=[aet.arange(0, 300)],
-        outputs_info=[
-            e
-            for e in aet.cast(
-                (pkm1, pkm2, qkm1, qkm2, k1, k2, k3, k4, k5, k6, k7, k8, r), "float64"
-            )
-        ],
-    )
-
-    return r[-1]
-
-
-def incomplete_beta_ps(a, b, value):
-    """Power series for incomplete beta
-    Use when b*x is small and value not too close to 1.
-    Based on Cephes library by Steve Moshier (incbet.c)
-    """
-    one = aet.constant(1, dtype="float64")
-    ai = one / a
-    u = (one - b) * value
-    t1 = u / (a + one)
-    t = u
-    threshold = np.MachAr().eps * ai
-    s = aet.constant(0, dtype="float64")
-
-    def _step(i, t, s):
-        t *= (i - b) * value / i
-        step = t / (a + i)
-        s += step
-        return ((t, s), until(aet.abs_(step) < threshold))
-
-    (t, s), _ = scan(
-        _step, sequences=[aet.arange(2, 302)], outputs_info=[e for e in aet.cast((t, s), "float64")]
-    )
-
-    s = s[-1] + t1 + ai
-
-    t = gammaln(a + b) - gammaln(a) - gammaln(b) + a * aet.log(value) + aet.log(s)
-    return aet.exp(t)
-
-
-def incomplete_beta(a, b, value):
-    """Incomplete beta implementation
-    Power series and continued fraction expansions chosen for best numerical
-    convergence across the board based on inputs.
-    """
-    machep = aet.constant(np.MachAr().eps, dtype="float64")
-    one = aet.constant(1, dtype="float64")
-    w = one - value
-
-    ps = incomplete_beta_ps(a, b, value)
-
-    flip = aet.gt(value, (a / (a + b)))
-    aa, bb = a, b
-    a = aet.switch(flip, bb, aa)
-    b = aet.switch(flip, aa, bb)
-    xc = aet.switch(flip, value, w)
-    x = aet.switch(flip, w, value)
-
-    tps = incomplete_beta_ps(a, b, x)
-    tps = aet.switch(aet.le(tps, machep), one - machep, one - tps)
-
-    # Choose which continued fraction expansion for best convergence.
-    small = aet.lt(x * (a + b - 2.0) - (a - one), 0.0)
-    cfe = incomplete_beta_cfe(a, b, x, small)
-    w = aet.switch(small, cfe, cfe / xc)
-
-    # Direct incomplete beta accounting for flipped a, b.
-    t = aet.exp(
-        a * aet.log(x) + b * aet.log(xc) + gammaln(a + b) - gammaln(a) - gammaln(b) + aet.log(w / a)
-    )
-
-    t = aet.switch(flip, aet.switch(aet.le(t, machep), one - machep, one - t), t)
-    return aet.switch(
-        aet.and_(flip, aet.and_(aet.le((b * x), one), aet.le(x, 0.95))),
-        tps,
-        aet.switch(aet.and_(aet.le(b * value, one), aet.le(value, 0.95)), ps, t),
-    )
-
-
 def clipped_beta_rvs(a, b, size=None, dtype="float64"):
     """Draw beta distributed random samples in the open :math:`(0, 1)` interval.
 
@@ -626,3 +465,165 @@ def clipped_beta_rvs(a, b, size=None, dtype="float64"):
     out = scipy.stats.beta.rvs(a, b, size=size).astype(dtype)
     lower, upper = _beta_clip_values[dtype]
     return np.maximum(np.minimum(out, upper), lower)
+
+
+def _betainc_dda(a, b, z, digamma_a, digamma_ab):
+    # Gradient of the regularized incomplete beta wrt to a. Adapted from:
+    # https://github.com/stan-dev/math/blob/master/stan/math/prim/fun/inc_beta_dda.hpp
+
+    if b > a:
+        if (
+            ((0.1 < z) and (z <= 0.75) and (b > 500))
+            or ((0.01 < z) and (z <= 0.1) and (b > 2500))
+            or ((0.001 < z) and (z <= 0.01) and (b > 1e5))
+        ):
+            return -_betainc_ddb(b, a, 1 - z, digamma_a, digamma_ab)
+    if (
+        ((z > 0.75) and (a < 500))
+        or ((z > 0.9) and (a < 2500))
+        or ((z > 0.99) and (a < 1e5))
+        or (z > 0.999)
+    ):
+        return -_betainc_ddb(b, a, 1 - z, digamma_a, digamma_ab)
+
+    threshold = 1e-10
+
+    a_plus_b = a + b
+    a_plus_1 = a + 1
+
+    digamma_a += 1 / a
+
+    prefactor = np.power(a_plus_1 / a_plus_b, 3)
+
+    sum_numer = (digamma_ab - digamma_a) * prefactor
+    sum_denom = prefactor
+
+    summand = prefactor * z * a_plus_b / a_plus_1
+
+    k = 1
+    digamma_ab += 1 / a_plus_b
+    digamma_a += 1 / a_plus_1
+
+    while abs(summand) > threshold:
+        sum_numer += (digamma_ab - digamma_a) * summand
+        sum_denom += summand
+
+        summand *= (1 + a_plus_b / k) * (1 + k) / (1 + a_plus_1 / k)
+        digamma_ab += 1 / (a_plus_b + k)
+        digamma_a += 1 / (a_plus_1 + k)
+        k += 1
+        summand *= z / k
+
+        if k > 1e5:
+            raise ValueError("_inc_beta_dda did not converge")
+
+    return scipy.special.betainc(a, b, z) * (np.log(z) + sum_numer / sum_denom)
+
+
+def _betainc_ddb(a, b, z, digamma_b, digamma_ab):
+    # Gradient of the regularized incomplete beta wrt to b. Adapted from:
+    # https://github.com/stan-dev/math/blob/master/stan/math/prim/fun/inc_beta_ddb.hpp
+
+    if b > a:
+        if (
+            ((0.1 < z) and (z <= 0.75) and (b > 500))
+            or ((0.01 < z) and (z <= 0.1) and (b > 2500))
+            or ((0.001 < z) and (z <= 0.01) and (b > 1e5))
+        ):
+            return -_betainc_dda(b, a, 1 - z, digamma_b, digamma_ab)
+    if (
+        ((z > 0.75) and (a < 500))
+        or ((z > 0.9) and (a < 2500))
+        or ((z > 0.99) and (a < 1e5))
+        or (z > 0.999)
+    ):
+        return -_betainc_dda(b, a, 1 - z, digamma_b, digamma_ab)
+
+    threshold = 1e-10
+
+    a_plus_b = a + b
+    a_plus_1 = a + 1
+
+    prefactor = np.power(a_plus_1 / a_plus_b, 3)
+
+    sum_numer = digamma_ab * prefactor
+    sum_denom = prefactor
+
+    summand = prefactor * z * a_plus_b / a_plus_1
+
+    k = 1
+    digamma_ab += 1 / a_plus_b
+
+    while abs(summand) > threshold:
+        sum_numer += digamma_ab * summand
+        sum_denom += summand
+
+        summand *= (1 + a_plus_b / k) * (1 + k) / (1 + a_plus_1 / k)
+        digamma_ab += 1 / (a_plus_b + k)
+        k += 1
+        summand *= z / k
+
+        if k > 1e5:
+            raise ValueError("_inc_beta_ddb did not converge")
+
+    return scipy.special.betainc(a, b, z) * (np.log1p(-z) - digamma_b + sum_numer / sum_denom)
+
+
+class TernaryScalarOp(ScalarOp):
+    nin = 3
+
+
+class BetaIncDda(TernaryScalarOp):
+    """
+    Gradient of the regularized incomplete beta function wrt to the first argument (a)
+    """
+
+    def impl(self, a, b, z):
+        digamma_a = scipy.special.digamma(a)
+        digamma_ab = scipy.special.digamma(a + b)
+        return _betainc_dda(a, b, z, digamma_a, digamma_ab)
+
+
+class BetaIncDdb(TernaryScalarOp):
+    """
+    Gradient of the regularized incomplete beta function wrt to the second argument (b)
+    """
+
+    def impl(self, a, b, z):
+        digamma_b = scipy.special.digamma(b)
+        digamma_ab = scipy.special.digamma(a + b)
+        return _betainc_ddb(a, b, z, digamma_b, digamma_ab)
+
+
+betainc_dda_scalar = BetaIncDda(upgrade_to_float_no_complex, name="betainc_dda")
+betainc_ddb_scalar = BetaIncDdb(upgrade_to_float_no_complex, name="betainc_ddb")
+
+
+class BetaInc(TernaryScalarOp):
+    """
+    Regularized incomplete beta function
+    """
+
+    nfunc_spec = ("scipy.special.betainc", 3, 1)
+
+    def impl(self, a, b, x):
+        return scipy.special.betainc(a, b, x)
+
+    def grad(self, inp, grads):
+        a, b, z = inp
+        (gz,) = grads
+
+        return [
+            gz * betainc_dda_scalar(a, b, z),
+            gz * betainc_ddb_scalar(a, b, z),
+            gz
+            * aes.exp(
+                aes.log1p(-z) * (b - 1)
+                + aes.log(z) * (a - 1)
+                - (aes.gammaln(a) + aes.gammaln(b) - aes.gammaln(a + b))
+            ),
+        ]
+
+
+betainc_scalar = BetaInc(upgrade_to_float_no_complex, "betainc")
+betainc = Elemwise(betainc_scalar, name="Elemwise{betainc,no_inplace}")
