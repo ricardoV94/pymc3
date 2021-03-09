@@ -21,11 +21,11 @@ from scipy import stats
 
 from pymc3.aesaraf import floatX, intX, take_along_axis
 from pymc3.distributions.dist_math import (
+    betainc,
     betaln,
     binomln,
     bound,
     factln,
-    incomplete_beta,
     log_diff_normal_cdf,
     logpow,
     normal_lccdf,
@@ -156,18 +156,14 @@ class Binomial(Discrete):
 
         Parameters
         ----------
-        value: numeric
-            Value for which log CDF is calculated.
+        value: numeric or np.ndarray or aesara.tensor
+            Value(s) for which log CDF is calculated. If the log CDF for multiple
+            values are desired the values must be provided in a numpy array or aesara tensor.
 
         Returns
         -------
         TensorVariable
         """
-        # incomplete_beta function can only handle scalar values (see #4342)
-        if np.ndim(value):
-            raise TypeError(
-                f"Binomial.logcdf expects a scalar value but received a {np.ndim(value)}-dimensional object."
-            )
 
         n = self.n
         p = self.p
@@ -176,7 +172,7 @@ class Binomial(Discrete):
         return bound(
             aet.switch(
                 aet.lt(value, n),
-                aet.log(incomplete_beta(n - value, value + 1, 1 - p)),
+                aet.log(betainc(n - value, value + 1, 1 - p)),
                 0,
             ),
             0 <= value,
@@ -903,25 +899,21 @@ class NegativeBinomial(Discrete):
 
         Parameters
         ----------
-        value: numeric
-            Value for which log CDF is calculated.
+        value: numeric or np.ndarray or aesara.tensor
+            Value(s) for which log CDF is calculated. If the log CDF for multiple
+            values are desired the values must be provided in a numpy array or aesara tensor.
 
         Returns
         -------
         TensorVariable
         """
-        # incomplete_beta function can only handle scalar values (see #4342)
-        if np.ndim(value):
-            raise TypeError(
-                f"NegativeBinomial.logcdf expects a scalar value but received a {np.ndim(value)}-dimensional object."
-            )
 
         # TODO: avoid `p` recomputation if distribution was defined in terms of `p`
         alpha = self.alpha
         p = alpha / (self.mu + alpha)
 
         return bound(
-            aet.log(incomplete_beta(alpha, aet.floor(value) + 1, p)),
+            aet.log(betainc(alpha, aet.floor(value) + 1, p)),
             0 <= value,
             0 < alpha,
             0 <= p,
@@ -1737,8 +1729,9 @@ class ZeroInflatedBinomial(Discrete):
 
         Parameters
         ----------
-        value: numeric
-            Value for which log CDF is calculated.
+        value: numeric or np.ndarray or aesara.tensor
+            Value(s) for which log CDF is calculated. If the log CDF for multiple
+            values are desired the values must be provided in a numpy array or aesara tensor.
 
         Returns
         -------
@@ -1905,8 +1898,9 @@ class ZeroInflatedNegativeBinomial(Discrete):
 
         Parameters
         ----------
-        value: numeric
-            Value for which log CDF is calculated.
+        value: numeric or np.ndarray or aesara.tensor
+            Value(s) for which log CDF is calculated. If the log CDF for multiple
+            values are desired the values must be provided in a numpy array or aesara tensor.
 
         Returns
         -------
