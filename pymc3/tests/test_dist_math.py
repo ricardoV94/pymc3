@@ -27,12 +27,13 @@ from pymc3.distributions.dist_math import (
     MvNormalLogp,
     SplineWrapper,
     alltrue_scalar,
+    betainc,
     bound,
     clipped_beta_rvs,
     factln,
     i0e,
 )
-from pymc3.tests.helpers import verify_grad
+from pymc3.tests.helpers import select_by_precision, verify_grad
 
 
 def test_bound():
@@ -241,3 +242,71 @@ def test_clipped_beta_rvs(dtype):
     # equal to zero or one (issue #3898)
     values = clipped_beta_rvs(0.01, 0.01, size=1000000, dtype=dtype)
     assert not (np.any(values == 0) or np.any(values == 1))
+
+
+class TestBetaIncGrad:
+
+    # This test replicates the one used by STAN in here:
+    # https://github.com/stan-dev/math/blob/master/test/unit/math/prim/fun/grad_reg_inc_beta_test.cpp
+    @aesara.config.change_flags(compute_test_value="ignore")
+    @pytest.mark.parametrize(
+        "test_a, test_b, test_z, expected_dda, expected_ddb",
+        [
+            (1.0, 1.0, 1.0, 0, np.nan),
+            (1.0, 1.0, 0.4, -0.36651629, 0.30649537),
+        ],
+    )
+    def test_grad_stan(self, test_a, test_b, test_z, expected_dda, expected_ddb):
+        a, b, z = aet.scalars("a", "b", "z")
+        betainc_out = betainc(a, b, z)
+        betainc_grad = aet.grad(betainc_out, [a, b])
+        f_grad = aesara.function([a, b, z], betainc_grad)
+
+        npt.assert_allclose(f_grad(test_a, test_b, test_z), [expected_dda, expected_ddb])
+
+    # This test combines the following STAN tests:
+    # https://github.com/stan-dev/math/blob/master/test/unit/math/prim/fun/inc_beta_dda_test.cpp
+    # https://github.com/stan-dev/math/blob/master/test/unit/math/prim/fun/inc_beta_ddb_test.cpp
+    # https://github.com/stan-dev/math/blob/master/test/unit/math/prim/fun/inc_beta_ddz_test.cpp
+    @aesara.config.change_flags(compute_test_value="ignore")
+    @pytest.mark.parametrize(
+        "test_a, test_b, test_z, expected_dda, expected_ddb, expected_ddz",
+        [
+            (1.5, 1.25, 0.001, -0.00028665637, 4.41357328e-05, 0.063300692),
+            (1.5, 1.25, 0.5, -0.26038693947, 0.29301795, 1.1905416),
+            (1.5, 1.25, 0.6, -0.23806757, 0.32279575, 1.23341068),
+            (1.5, 1.25, 0.999, -0.00022264493, 0.0018969609, 0.35587692),
+            (15000, 1.25, 0.001, 0, 0, 0),
+            (15000, 1.25, 0.5, 0, 0, 0),
+            (15000, 1.25, 0.6, 0, 0, 0),
+            (15000, 1.25, 0.999, 0.00091716705, -2.1355520, 0.009898182),
+            (1.5, 12500, 0.001, 1.8226241, -8.804892e-04, 0.1848717),
+            (1.5, 12500, 0.5, 0, 0, 0),
+            (1.5, 12500, 0.6, 0, 0, 0),
+            (1.5, 12500, 0.999, 0, 0, 0),
+            (15000, 12500, 0.001, 0, 0, 0),
+            (15000, 12500, 0.5, -8.72102443e-53, 9.55282792e-53, 5.01131256e-48),
+            (15000, 12500, 0.6, -4.085621e-14, -5.5067062e-14, 1.15135267e-71),
+            (15000, 12500, 0.999, 0, 0, 0),
+        ],
+    )
+    def test_grad_stan_partials(
+        self, test_a, test_b, test_z, expected_dda, expected_ddb, expected_ddz
+    ):
+        a, b, z = aet.scalars("a", "b", "z")
+        betainc_out = betainc(a, b, z)
+        betainc_grad = aet.grad(betainc_out, [a, b, z])
+        f_grad = aesara.function([a, b, z], betainc_grad)
+
+        npt.assert_almost_equal(
+            f_grad(test_a, test_b, test_z),
+            [expected_dda, expected_ddb, expected_ddz],
+            select_by_precision(float64=6, float32=3),
+        )
+
+    @aesara.config.change_flags(compute_test_value="ignore")
+    @pytest.mark.parametrize("test_a", [0.1, 3.0, 1000.0])
+    @pytest.mark.parametrize("test_b", [0.1, 1.0, 30.0, 70.0])
+    @pytest.mark.parametrize("test_z", [0.01, 0.1, 0.5, 0.7, 0.99])
+    def test_aesara_grad(self, test_a, test_b, test_z):
+        verify_grad(betainc, [test_a, test_b, test_z])
