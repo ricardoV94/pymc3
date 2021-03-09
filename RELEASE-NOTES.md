@@ -3,10 +3,12 @@
 ## PyMC3 vNext (TBD)
 ### Breaking Changes
 - ⚠ Theano-PyMC has been replaced with Aesara, so all external references to `theano`, `tt`, and `pymc3.theanof` need to be replaced with `aesara`, `aet`, and `pymc3.aesaraf` (see [4471](https://github.com/pymc-devs/pymc3/pull/4471)).
+- The `incomplete_beta` function in pymc3.distributions.dist_math was replaced by an equivalent fast vectorized `betainc` Aesara `Op` (see [4519](https://github.com/pymc-devs/pymc3/pull/4519)).
 
 ### New Features
 + `pm.math.cartesian` can now handle inputs that are themselves >1D (see [#4482](https://github.com/pymc-devs/pymc3/pull/4482)).
 + The `CAR` distribution has been added to allow for use of conditional autoregressions which often are used in spatial and network models.
++ The `logcdf` method of `Beta`, `StudentT`, `Binomial`, `NegativeBinomial` (and zero inflated variants) can now evaluate multiple values at once (see [4519](https://github.com/pymc-devs/pymc3/pull/4519)).
 + ...
 
 ### Maintenance
