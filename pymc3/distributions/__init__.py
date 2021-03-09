@@ -444,6 +444,7 @@ from pymc3.distributions.distribution import (
 )
 from pymc3.distributions.mixture import Mixture, MixtureSameFamily, NormalMixture
 from pymc3.distributions.multivariate import (
+    CAR,
     Dirichlet,
     DirichletMultinomial,
     KroneckerNormal,
@@ -545,4 +546,5 @@ __all__ = [
     "Moyal",
     "Simulator",
     "BART",
+    "CAR",
 ]
