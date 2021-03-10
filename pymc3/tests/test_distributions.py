@@ -993,7 +993,7 @@ class TestMatchesScipy:
             lambda value, mu, alpha: sp.invgauss.logcdf(value, mu=mu, loc=alpha),
         )
 
-    def test_beta(self):
+    def test_beta_logp(self):
         self.check_logp(
             Beta,
             Unit,
@@ -1001,6 +1001,12 @@ class TestMatchesScipy:
             lambda value, alpha, beta: sp.beta.logpdf(value, alpha, beta),
         )
         self.check_logp(Beta, Unit, {"mu": Unit, "sigma": Rplus}, beta_mu_sigma)
+
+    @pytest.mark.xfail(
+        condition=(aesara.config.floatX == "float32"),
+        reason="Some combinations underflow to -inf on float32",
+    )
+    def test_beta_logcdf(self):
         self.check_logcdf(
             Beta,
             Unit,
